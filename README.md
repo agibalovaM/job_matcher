@@ -31,13 +31,15 @@
 
 ## Установка
 
-Нужны macOS (автозапуск через launchd), Python 3.9+ и доступ в интернет: `pip` скачивает пакеты с PyPI, а `playwright install chromium` — браузер Chromium (около 150 МБ).
+Нужны Python 3.9+ и доступ в интернет: `pip` скачивает пакеты с PyPI, а `playwright install chromium` — браузер Chromium (около 150 МБ). Основные команды должны работать на macOS, Windows и Linux, но проверены только на macOS. Автозапуск через `install-launchd` — только macOS (см. «Автозапуск на других системах»).
 
 ```bash
 git clone https://github.com/agibalovaM/job_matcher.git
 cd job_matcher
 python3 -m venv .venv
 source .venv/bin/activate
+# Windows: .venv\Scripts\activate (cmd) или .venv\Scripts\Activate.ps1 (PowerShell);
+#          вместо python3 — python, в cmd вместо cp — copy
 python -m pip install -r requirements.txt
 python -m playwright install chromium
 cp .env.example .env
@@ -175,12 +177,28 @@ python -m job_matcher.cli import-profile-json profile.json
 
 Логи launchd по умолчанию пишутся в `data/logs/hh-browser.out.log` и `data/logs/hh-browser.err.log`.
 
+## Автозапуск на других системах
+
+`install-launchd` работает только на macOS. На Windows и Linux задачу можно настроить вручную. Эти способы не проверялись. Запускать чаще раза в 5 минут не стоит; по умолчанию проект рассчитан на раз в 30 минут.
+
+- **Windows — Планировщик заданий (Task Scheduler).** Создайте задачу с триггером, который повторяется каждые 30 минут. Действие: программа `.venv\Scripts\python.exe` (полный путь), аргументы `-m job_matcher.cli monitor-once --headless --notify`, рабочая папка («Начать в») — папка проекта.
+- **Linux — cron.** Строка в `crontab -e` для запуска раз в 30 минут (папка `data/logs` должна существовать):
+
+  ```cron
+  */30 * * * * cd /path/to/job_matcher && .venv/bin/python -m job_matcher.cli monitor-once --headless --notify >> data/logs/monitor.out.log 2>&1
+  ```
+
 ## Что не работает или не проверено
 
 - `LINKEDIN_MBOX_PATH` на реальном `.mbox`-экспорте не проверялся.
 - Gmail не проверялся на реальном ящике.
 - `linkedin-notify-test` и `hh-browser-notify-test` на реальных данных могут отправлять уведомления, поэтому запускайте их только осознанно.
 - Поля профиля `target_roles` и `skills` не используются в оценке (см. «Профиль кандидата»).
+- Windows и Linux не проверялись. Известные места, которые там могут не сработать:
+  - сообщение в Telegram о капче и подсказка при отсутствии Playwright называют путь `.venv/bin/python`; на Windows это `.venv\Scripts\python.exe`;
+  - вывод в консоль и логи идёт в кодировке системы: при перенаправлении в файл на Windows символы вне её кодировки (например, в названиях вакансий) могут вызвать ошибку; поможет переменная окружения `PYTHONUTF8=1`;
+  - в тестах `tests/test_monitor_sources.py` файлы читаются без явной кодировки, а в `tests/test_dedupe_notifications.py` и `tests/test_monitor_sources.py` соединение с SQLite не закрывается до удаления временной папки — на Windows эти тесты могут падать, хотя само приложение это не затрагивает;
+  - ручная пауза через `sqlite3 …` из раздела «В планах» требует утилиты `sqlite3`, которой по умолчанию нет на Windows.
 
 ## В планах
 
@@ -199,6 +217,7 @@ python -m job_matcher.cli import-profile-json profile.json
 
 ```bash
 source .venv/bin/activate
+# Windows: .venv\Scripts\activate (cmd) или .venv\Scripts\Activate.ps1 (PowerShell)
 python -m unittest
 ```
 
