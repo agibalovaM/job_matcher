@@ -33,8 +33,6 @@ class Settings:
     db_path: str = "data/job_matcher.sqlite"
     poll_interval_seconds: int = 300
     threshold: int = 4
-    hh_user_agent: str = "MarinaJobMatcher/0.1 (configure-email@example.com)"
-    hh_access_token: str = ""
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     linkedin_imap_host: str = "imap.gmail.com"
@@ -53,8 +51,6 @@ class Settings:
             db_path=os.getenv("APP_DB_PATH", cls.db_path),
             poll_interval_seconds=int(os.getenv("APP_POLL_INTERVAL_SECONDS", cls.poll_interval_seconds)),
             threshold=int(os.getenv("APP_THRESHOLD", cls.threshold)),
-            hh_user_agent=os.getenv("HH_USER_AGENT", cls.hh_user_agent),
-            hh_access_token=os.getenv("HH_ACCESS_TOKEN", ""),
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
             linkedin_imap_host=os.getenv("LINKEDIN_IMAP_HOST") or cls.linkedin_imap_host,

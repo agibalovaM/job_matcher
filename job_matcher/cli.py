@@ -4,11 +4,10 @@ import argparse
 import json
 import plistlib
 import subprocess
-import time
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
-from .app import DEFAULT_QUERIES, HH_BROWSER_QUERIES, JobMatcherApp, should_notify
+from .app import HH_BROWSER_QUERIES, JobMatcherApp, should_notify
 from .config import Settings
 from .db import Store
 from .models import CandidateProfile
@@ -16,7 +15,6 @@ from .models import Vacancy
 from .resume import profile_from_resume
 from .sources_linkedin_email import LinkedInMailbox, LinkedInMailError, linkedin_from_mbox, linkedin_from_text, parse_alert_email
 from .sources_hh_browser import HHCaptchaDetected, open_hh_browser_session, search_hh_browser
-from .sources_hh import HHApiError, HHClient
 
 
 def cmd_init_db(args: argparse.Namespace) -> None:
@@ -55,22 +53,8 @@ def cmd_profile(args: argparse.Namespace) -> None:
     print(json.dumps(store.load_profile().to_json(), ensure_ascii=False, indent=2))
 
 
-def cmd_hh_once(args: argparse.Namespace) -> None:
-    settings = Settings.from_env()
-    app = JobMatcherApp(settings)
-    client = HHClient(settings.hh_user_agent, settings.hh_access_token)
-    try:
-        vacancies = client.search(DEFAULT_QUERIES, minutes_back=args.minutes_back)
-    except HHApiError as exc:
-        print(f"hh.ru failed: {exc}")
-        raise SystemExit(2) from exc
-    else:
-        seen, sent = app.process_vacancies(vacancies, notify=not args.no_notify)
-        print(f"hh.ru processed: new={seen}, sent={sent}, fetched={len(vacancies)}")
-
-
 def cmd_hh_browser_login(args: argparse.Namespace) -> None:
-    query = args.query or DEFAULT_QUERIES[0]
+    query = args.query or HH_BROWSER_QUERIES[0]
     print("Opening hh.ru in a persistent browser profile.")
     print("Log in or complete captcha manually in the browser window. Close the browser when finished.")
     try:
@@ -273,7 +257,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"DB: {settings.db_path}")
     print(f"Paused: {store.get_state('paused', 'false')}")
     print(f"Threshold: {store.get_state('threshold', str(settings.threshold))}")
-    print(f"hh.ru interval: {settings.poll_interval_seconds}s; API date_from rounded to nearest 5 minutes")
+    print(f"Poll interval: {settings.poll_interval_seconds}s (launchd runs monitor-once at most every 300s)")
     print("LinkedIn: official Job Alerts only; source delay daily/weekly, local email polling can be frequent")
 
 
@@ -385,23 +369,6 @@ def cmd_monitor_once(args: argparse.Namespace) -> None:
     print(f"monitor total: fetched={total_fetched}, new={total_new}, sent={total_sent}")
 
 
-def cmd_serve(args: argparse.Namespace) -> None:
-    settings = Settings.from_env()
-    app = JobMatcherApp(settings)
-    hh = HHClient(settings.hh_user_agent, settings.hh_access_token)
-    while True:
-        try:
-            if app.telegram.enabled:
-                app.handle_telegram_commands()
-            vacancies = hh.search(DEFAULT_QUERIES, minutes_back=max(15, settings.poll_interval_seconds // 60 + 10))
-            seen, sent = app.process_vacancies(vacancies)
-            sent += app.retry_failed_notifications()
-            print(f"tick: hh fetched={len(vacancies)} new={seen} sent={sent}")
-        except Exception as exc:
-            print(f"tick error: {exc}")
-        time.sleep(settings.poll_interval_seconds)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Local job matcher for Marina Agibalova")
     sub = parser.add_subparsers(required=True)
@@ -415,10 +382,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_import_profile_json)
     p = sub.add_parser("profile")
     p.set_defaults(func=cmd_profile)
-    p = sub.add_parser("hh-once")
-    p.add_argument("--minutes-back", type=int, default=15)
-    p.add_argument("--no-notify", action="store_true")
-    p.set_defaults(func=cmd_hh_once)
     p = sub.add_parser("hh-browser-login")
     p.add_argument("--query")
     p.set_defaults(func=cmd_hh_browser_login)
@@ -454,8 +417,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_ingest_alert)
     p = sub.add_parser("status")
     p.set_defaults(func=cmd_status)
-    p = sub.add_parser("serve")
-    p.set_defaults(func=cmd_serve)
     p = sub.add_parser("monitor-once")
     p.add_argument("--limit", type=int, default=10)
     p.add_argument("--pages", type=int, default=1)

@@ -12,7 +12,6 @@
 |---|---|---|
 | hh.ru (браузер) | Поиск hh.ru в отдельном профиле Chromium через Playwright; вход и капча только вручную | Работает локально |
 | LinkedIn Job Alerts | Письма `jobalerts-noreply@linkedin.com` из почты по IMAP, только чтение | Работает на Mail.ru; Gmail описан, но на реальном ящике не проверялся |
-| hh.ru API | `GET https://api.hh.ru/vacancies` (`hh-once`, `serve`) | Не работает без OAuth: API отвечает `403 forbidden` на анонимный доступ |
 
 ## Как Это Работает
 
@@ -54,8 +53,6 @@ python -m unittest
 | `APP_DB_PATH` | `data/job_matcher.sqlite` | Нет |
 | `APP_POLL_INTERVAL_SECONDS` | `300` | Нет |
 | `APP_THRESHOLD` | `4` | Нет |
-| `HH_USER_AGENT` | `MarinaJobMatcher/0.1 (configure-email@example.com)` | Для `hh-once`/`serve`; для браузерного hh.ru не нужна |
-| `HH_ACCESS_TOKEN` | пусто | Только для неработающего сейчас hh.ru API |
 | `TELEGRAM_BOT_TOKEN` | пусто | Да, если нужны Telegram-уведомления |
 | `TELEGRAM_CHAT_ID` | пусто | Да, если нужны Telegram-уведомления |
 | `LINKEDIN_IMAP_HOST` | `imap.gmail.com` | Да, если используется LinkedIn IMAP |
@@ -167,25 +164,20 @@ python -m job_matcher.cli import-profile-json profile.json
 | `python -m job_matcher.cli hh-browser-notify-test [--query TEXT] [--limit N] [--headless]` | Отправить тестовое уведомление по реальной hh.ru-вакансии, если найдётся подходящая |
 | `python -m job_matcher.cli linkedin-notify-test` | Отправить тестовое уведомление по LinkedIn-вакансии, если найдётся подходящая |
 
-Неработающие/legacy-команды:
-
-| Команда | Статус |
-|---|---|
-| `python -m job_matcher.cli hh-once [--minutes-back N] [--no-notify]` | Использует официальный API hh.ru; без OAuth получает `403 forbidden` |
-| `python -m job_matcher.cli serve` | Использует тот же hh.ru API и Telegram command loop; сейчас не является рабочим путём |
-
 `install-launchd` пишет файл `~/Library/LaunchAgents/local.marina-job-search.hh-browser.plist` с абсолютными путями к проекту и загружает его через `launchctl`, после чего `monitor-once --headless --notify` запускается раз в `APP_POLL_INTERVAL_SECONDS` секунд, но не чаще раза в 5 минут. Отключить: `launchctl unload ~/Library/LaunchAgents/local.marina-job-search.hh-browser.plist`.
 
 Логи launchd по умолчанию пишутся в `data/logs/hh-browser.out.log` и `data/logs/hh-browser.err.log`.
 
 ## Что Не Работает Или Не Проверено
 
-- `hh-once` и `serve` используют официальный API hh.ru и без OAuth-токена в `HH_ACCESS_TOKEN` получают `403 forbidden`.
-- Telegram-команды (`/pause`, `/resume`, `/latest`, `/why`, `/threshold`) обрабатываются только внутри `serve`, поэтому сейчас не являются рабочим пользовательским интерфейсом.
 - `LINKEDIN_MBOX_PATH` на реальном `.mbox`-экспорте не проверялся.
 - Gmail не проверялся на реальном ящике.
 - `linkedin-notify-test` и `hh-browser-notify-test` на реальных данных могут отправлять уведомления, поэтому запускайте их только осознанно.
 - Поля профиля `target_roles` и `skills` не используются в оценке (см. «Профиль кандидата»).
+
+## В Планах
+
+- **Команды Telegram-бота**: `/pause` (пауза), `/resume` (возобновить), `/threshold N` (порог), `/latest` (последние вакансии), `/why` (почему отобрана) и разбор пересланной боту ссылки LinkedIn. Код лежит в [job_matcher/telegram_bot.py](job_matcher/telegram_bot.py), но ни к одной команде не подключён: его нужно вызывать периодически, например из `monitor-once`. Пока паузу можно включить вручную: `sqlite3 data/job_matcher.sqlite "UPDATE state SET value='true' WHERE key='paused'"`.
 
 ## Как Добавить Источник
 

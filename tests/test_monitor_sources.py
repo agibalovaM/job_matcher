@@ -1,4 +1,5 @@
 import argparse
+import re
 import io
 import tempfile
 import unittest
@@ -51,6 +52,32 @@ class MonitorSourcesTests(unittest.TestCase):
 
     def test_registered_sources(self):
         self.assertEqual([name for name, _ in cli.MONITOR_SOURCES], ["hh", "linkedin"])
+
+
+class RemovedHHApiTests(unittest.TestCase):
+    """The official hh.ru API source (hh-once, serve) is removed; bot commands are kept but not wired."""
+
+    def test_cli_has_no_hh_api_commands(self):
+        commands = set(cli.build_parser()._subparsers._group_actions[0].choices)
+        self.assertNotIn("hh-once", commands)
+        self.assertNotIn("serve", commands)
+        self.assertTrue({"monitor-once", "hh-browser-once", "linkedin-once", "install-launchd"} <= commands)
+
+    def test_bot_module_kept_but_not_wired(self):
+        import pathlib
+
+        from job_matcher import telegram_bot
+
+        self.assertTrue(callable(telegram_bot.handle_telegram_commands))
+        package = pathlib.Path(cli.__file__).parent
+        imports_bot = re.compile(r"^\s*(from\s+\S*telegram_bot\s+import|import\s+\S*telegram_bot\b|from\s+\.\s+import\s+.*\btelegram_bot\b)", re.M)
+        importers = [f.name for f in package.glob("*.py") if f.name != "telegram_bot.py" and imports_bot.search(f.read_text())]
+        self.assertEqual(importers, [])
+
+    def test_hh_browser_login_default_query_unchanged(self):
+        from job_matcher.app import HH_BROWSER_QUERIES
+
+        self.assertEqual(HH_BROWSER_QUERIES[0], "IT Project Manager")
 
 
 if __name__ == "__main__":
