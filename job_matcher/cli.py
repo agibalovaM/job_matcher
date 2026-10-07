@@ -56,7 +56,7 @@ def cmd_profile(args: argparse.Namespace) -> None:
 def cmd_hh_browser_login(args: argparse.Namespace) -> None:
     query = args.query or HH_BROWSER_QUERIES[0]
     print("Opening hh.ru in a persistent browser profile.")
-    print("Log in or complete captcha manually in the browser window. Close the browser when finished.")
+    print("If hh.ru shows a captcha, complete it manually in the browser window. Logging in is not needed.")
     try:
         open_hh_browser_session(query)
     except HHCaptchaDetected as exc:
@@ -70,7 +70,8 @@ def cmd_hh_browser_once(args: argparse.Namespace) -> None:
     app = JobMatcherApp(settings)
     queries = [args.query] if args.query else HH_BROWSER_QUERIES
     try:
-        vacancies = search_hh_browser(queries, limit_per_query=args.limit, pages=args.pages, headless=args.headless)
+        vacancies = search_hh_browser(queries, limit_per_query=args.limit, pages=args.pages, headless=args.headless,
+                                      is_known=known_hh_vacancy(app, {}))
     except HHCaptchaDetected as exc:
         print(f"hh.ru browser stopped: {exc}")
         notify_browser_attention(app, str(exc))
@@ -92,7 +93,7 @@ def notify_browser_attention(app: JobMatcherApp, reason: str) -> None:
         "hh.ru browser мониторинг остановился и требует ручного действия.\n\n"
         f"Причина: {reason}\n\n"
         "Откройте локально: .venv/bin/python -m job_matcher.cli hh-browser-login\n"
-        "Войдите в hh.ru или пройдите капчу вручную. Я не буду обходить капчу и не читаю cookies."
+        "Пройдите капчу вручную в открывшемся окне браузера (входить в аккаунт не нужно). Приложение не обходит капчу."
     )
     try:
         app.telegram.send_message(text)
@@ -257,7 +258,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"DB: {settings.db_path}")
     print(f"Paused: {store.get_state('paused', 'false')}")
     print(f"Threshold: {store.get_state('threshold', str(settings.threshold))}")
-    print(f"Poll interval: {settings.poll_interval_seconds}s (launchd runs monitor-once at most every 300s)")
+    print(f"Poll interval: {settings.poll_interval_seconds}s (install-launchd never schedules monitor-once more often than every 300s)")
     print("LinkedIn: official Job Alerts only; source delay daily/weekly, local email polling can be frequent")
 
 
@@ -317,15 +318,27 @@ def cmd_install_launchd(args: argparse.Namespace) -> None:
 SourceRun = Optional[Tuple[int, int, int]]
 
 
+def known_hh_vacancy(app: JobMatcherApp, counter: dict):
+    """Callback for search_hh_browser: skip vacancies already in the database, count them for the log."""
+    def is_known(source_id: str) -> bool:
+        known = app.store.has_vacancy("hh-browser", source_id)
+        counter["known"] = counter.get("known", 0) + int(known)
+        return known
+    return is_known
+
+
 def monitor_hh_browser(app: JobMatcherApp, settings: Settings, args: argparse.Namespace) -> SourceRun:
+    counter: dict = {}
     try:
-        vacancies = search_hh_browser(HH_BROWSER_QUERIES, limit_per_query=args.limit, pages=args.pages, headless=args.headless)
+        vacancies = search_hh_browser(HH_BROWSER_QUERIES, limit_per_query=args.limit, pages=args.pages,
+                                      headless=args.headless, is_known=known_hh_vacancy(app, counter))
     except HHCaptchaDetected as exc:
         print(f"hh.ru browser stopped: {exc}")
         notify_browser_attention(app, str(exc))
         return 0, 0, 0
     # Re-arm the captcha alert once the browser works again.
     app.store.set_state("hh_browser_attention_sent", "false")
+    print(f"monitor hh: known={counter.get('known', 0)} (pages not opened), new pages opened={len(vacancies)}")
     seen, sent = app.process_vacancies(vacancies, notify=args.notify)
     return len(vacancies), seen, sent
 

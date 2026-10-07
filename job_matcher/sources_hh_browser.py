@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Callable, Iterable, List, Optional
 from urllib.parse import urlencode
 
 from .models import Vacancy
@@ -35,7 +35,9 @@ def search_hh_browser(
     limit_per_query: int = 10,
     pages: int = 1,
     headless: bool = False,
+    is_known: Optional[Callable[[str], bool]] = None,
 ) -> List[Vacancy]:
+    """`is_known(source_id)` -> True skips a vacancy already in the database without opening its page."""
     try:
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -75,7 +77,7 @@ def search_hh_browser(
                             raise HHCaptchaDetected(
                                 "hh.ru showed a captcha. Complete it manually in the opened browser window, then rerun."
                             )
-                    vacancies.extend(extract_vacancies_from_page(context, page, limit_per_query))
+                    vacancies.extend(extract_vacancies_from_page(context, page, limit_per_query, is_known))
         finally:
             context.close()
     return vacancies
@@ -97,7 +99,7 @@ def open_hh_browser_session(query: str, profile_dir: str = HH_BROWSER_PROFILE) -
         )
         page = context.pages[0] if context.pages else context.new_page()
         page.goto(hh_search_url(query), wait_until="domcontentloaded", timeout=60000)
-        input("After logging in or solving captcha in the browser, press Enter here to close it...")
+        input("After solving the captcha in the browser (if any), press Enter here to close it...")
         context.close()
 
 
@@ -107,7 +109,7 @@ def is_captcha_page(page) -> bool:
     return "captcha" in url or "капч" in text or "подтвердите, что вы не робот" in text
 
 
-def extract_vacancies_from_page(context, page, limit: int) -> List[Vacancy]:
+def extract_vacancies_from_page(context, page, limit: int, is_known: Optional[Callable[[str], bool]] = None) -> List[Vacancy]:
     cards = page.locator('[data-qa="vacancy-serp__vacancy"]')
     if cards.count() == 0:
         cards = page.locator('[data-qa="vacancy-serp__vacancy_standard"]')
@@ -117,6 +119,9 @@ def extract_vacancies_from_page(context, page, limit: int) -> List[Vacancy]:
     count = min(cards.count(), limit)
     for idx in range(count):
         vacancy = card_or_skip(cards.nth(idx), idx)
+        if vacancy is not None and is_known is not None and is_known(vacancy.source_id):
+            # Already saved and scored: opening its page again would only add load on hh.ru.
+            continue
         if vacancy is not None:
             vacancy = enrich_or_skip(context, vacancy)
         if vacancy is not None:

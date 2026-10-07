@@ -190,9 +190,9 @@ class ScoringRulesV2Tests(unittest.TestCase):
     # Industry
     def test_industry_nice_to_have_is_not_required(self):
         for phrase in [
-            "будет плюсом: знание python и sql. опыт работы в fintech или продуктовых компаниях.",
-            "опыт работы project manager от 2 лет, желательно в it или fintech/payment domain",
-            "будет преимуществом: опыт работы в fintech, lending, banking",
+            "будет плюсом: умение писать запросы на sql. опыт в fintech тоже пригодится.",
+            "опыт управления проектами от двух лет, желательно в fintech",
+            "преимуществом станет опыт в fintech или в банках",
             "nice to have: experience in igaming",
             "preferred: fintech experience",
             "experience in fintech is a plus",
@@ -261,9 +261,8 @@ class BorderlineCasesTests(unittest.TestCase):
         vacancy = Vacancy(
             source="hh-browser", source_id="100001", title="IT Project Manager", company="Initech",
             url="https://example.com/vacancy/100001", location="Example Country", remote=True,
-            description="Наш клиент — международная продуктовая IT-компания. Контролировать SLA, отчётность и ключевые метрики. "
-                        "Требования: опыт работы project manager от 2 лет, желательно в IT или fintech/payment domain, "
-                        "понимание API-интеграций.",
+            description="Продуктовой компании нужен менеджер проектов: сроки, риски, отчёты для заказчика. "
+                        "Требования: опыт управления проектами от двух лет, желательно в fintech; понимание API.",
         )
         result = score_vacancy(vacancy, CandidateProfile())
         self.assertEqual(result.rejects, [])

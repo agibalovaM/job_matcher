@@ -31,7 +31,7 @@ def env_bool(key: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class Settings:
     db_path: str = "data/job_matcher.sqlite"
-    poll_interval_seconds: int = 300
+    poll_interval_seconds: int = 1800
     threshold: int = 4
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""

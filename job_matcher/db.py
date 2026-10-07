@@ -227,6 +227,10 @@ class Store:
             (max_attempts,),
         ).fetchall()
 
+    def has_vacancy(self, source: str, source_id: str) -> bool:
+        row = self.conn.execute("SELECT 1 FROM vacancies WHERE source = ? AND source_id = ?", (source, source_id)).fetchone()
+        return row is not None
+
     def is_email_processed(self, message_id: str) -> bool:
         row = self.conn.execute("SELECT 1 FROM processed_emails WHERE message_id = ?", (message_id,)).fetchone()
         return row is not None

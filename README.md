@@ -1,19 +1,25 @@
-# Marina Job Matcher
+# Job Matcher
 
-Локальное учебное macOS-приложение для личного мониторинга вакансий: собирает новые вакансии из hh.ru и LinkedIn Job Alerts, сохраняет их в SQLite, отсекает дубли, оценивает по профилю кандидата и отправляет уведомления в Telegram.
+Локальное приложение для macOS, которое помогает в личном поиске работы: собирает вакансии из общедоступной выдачи hh.ru и из писем LinkedIn Job Alerts, которые приходят на почту пользователя, оценивает их по профилю кандидата и присылает подходящие в Telegram.
 
-## Дисклеймер
+## Правовая информация
 
-Проект предназначен для локального использования и демонстрации подхода к пайплайну поиска вакансий. Он не обходит капчу, не извлекает cookies напрямую и не должен использоваться для агрессивного скрейпинга. Частота запусков ограничивается настройками приложения и launchd. Пользователь сам отвечает за соблюдение правил hh.ru, LinkedIn, почтового провайдера и Telegram Bot API.
+- Проект создан для личного некоммерческого поиска работы: автор запускает его на своём компьютере. Это не сервис и не база данных вакансий: собранные данные хранятся локально и никуда не передаются.
+- В репозитории нет данных, полученных с hh.ru или LinkedIn.
+- Приложение открывает те же страницы, что и обычный браузер, с низкой частотой: по умолчанию раз в 30 минут, за запуск — 3 страницы поиска и страницы только новых вакансий (уже известные не открываются повторно). Оно не обходит капчу и другие защитные механизмы и не использует непубличные API.
+- Письма LinkedIn читаются из почтового ящика самого пользователя только на чтение (по умолчанию; при `LINKEDIN_MARK_AS_READ=true` обработанные письма помечаются прочитанными).
+- Проект не связан с HeadHunter, LinkedIn или Telegram и не одобрен ими. hh.ru, LinkedIn и Telegram — товарные знаки их правообладателей.
+- Перед использованием ознакомьтесь с правилами hh.ru, LinkedIn, вашего почтового сервиса и Telegram. Пользователь сам отвечает за соблюдение этих правил и применимого законодательства.
+- Программа предоставляется «как есть», без каких-либо гарантий (см. [LICENSE](LICENSE)).
 
 ## Источники
 
 | Источник | Как получает данные | Статус |
 |---|---|---|
-| hh.ru (браузер) | Поиск hh.ru в отдельном профиле Chromium через Playwright; вход и капча только вручную | Работает локально |
-| LinkedIn Job Alerts | Письма `jobalerts-noreply@linkedin.com` из почты по IMAP, только чтение | Работает на Mail.ru; Gmail описан, но на реальном ящике не проверялся |
+| hh.ru (браузер) | Общедоступная выдача hh.ru в отдельном профиле Chromium через Playwright, без входа в аккаунт; капча только вручную | Работает локально |
+| LinkedIn Job Alerts | Письма `jobalerts-noreply@linkedin.com` из почты по IMAP, только чтение (по умолчанию) | Работает на Mail.ru; Gmail описан, но на реальном ящике не проверялся |
 
-## Как Это Работает
+## Как это работает
 
 `monitor-once --headless --notify` по очереди опрашивает источники из `MONITOR_SOURCES` в [job_matcher/cli.py](job_matcher/cli.py). Каждая новая вакансия проходит общий пайплайн:
 
@@ -28,8 +34,8 @@
 Нужны macOS (автозапуск через launchd), Python 3.9+ и доступ в интернет: `pip` скачивает пакеты с PyPI, а `playwright install chromium` — браузер Chromium (около 150 МБ).
 
 ```bash
-git clone <repo-url> job_search
-cd job_search
+git clone https://github.com/agibalovaM/job_matcher.git
+cd job_matcher
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
@@ -46,12 +52,12 @@ python -m unittest
 
 Зависимости: `playwright` для браузерного поиска hh.ru, `beautifulsoup4` для разбора писем LinkedIn, `pypdf` и `python-docx` для импорта резюме.
 
-## Переменные Окружения
+## Переменные окружения
 
 | Имя | По умолчанию | Обязательна ли |
 |---|---|---|
 | `APP_DB_PATH` | `data/job_matcher.sqlite` | Нет |
-| `APP_POLL_INTERVAL_SECONDS` | `300` | Нет |
+| `APP_POLL_INTERVAL_SECONDS` | `1800` (30 минут) | Нет; меньше 300 не ставится |
 | `APP_THRESHOLD` | `4` | Нет |
 | `TELEGRAM_BOT_TOKEN` | пусто | Да, если нужны Telegram-уведомления |
 | `TELEGRAM_CHAT_ID` | пусто | Да, если нужны Telegram-уведомления |
@@ -66,21 +72,22 @@ python -m unittest
 
 `.env` находится в `.gitignore`. Не коммитьте реальные токены, пароли, тексты писем, SQLite-базу, браузерный профиль и launchd-файлы с локальными путями.
 
-## hh.ru Через Браузер
+## hh.ru через браузер
 
-Поиск идёт в отдельном профиле браузера `.browser-profiles/hh`. Войдите в hh.ru вручную; приложение не спрашивает пароль и не обходит капчу:
+Поиск идёт по общедоступной выдаче hh.ru в отдельном профиле браузера `.browser-profiles/hh`. Входить в аккаунт hh.ru не нужно: приложение не спрашивает логин и пароль и не обходит капчу.
 
 ```bash
-python -m job_matcher.cli hh-browser-login
-python -m job_matcher.cli hh-browser-once --query "Delivery Manager" --limit 5
+python -m job_matcher.cli hh-browser-once --query "Delivery Manager" --limit 5   # первый запуск, без уведомлений
 python -m job_matcher.cli hh-browser-once --headless --notify
 ```
 
-Первый запуск лучше делать без `--notify`: старые результаты сохранятся как уже виденные, и в Telegram не придёт пачка старых вакансий. Если hh.ru показывает капчу, мониторинг hh пропускает запуск и один раз присылает в Telegram просьбу открыть `hh-browser-login` до следующего успешного запуска.
+Первый запуск лучше делать без `--notify`: старые результаты сохранятся как уже виденные, и в Telegram не придёт пачка старых вакансий.
+
+Если hh.ru показывает капчу, мониторинг hh пропускает запуск и один раз присылает в Telegram просьбу её пройти (до следующего успешного запуска). Тогда выполните `python -m job_matcher.cli hh-browser-login`: откроется окно браузера с тем же профилем, чтобы вручную пройти капчу.
 
 ## LinkedIn Job Alerts
 
-Приложение читает письма LinkedIn из почты по IMAP только на чтение: письма не удаляются, не перемещаются и по умолчанию не помечаются прочитанными (`BODY.PEEK`). Из каждого письма берутся название, компания, локация, формат работы, ссылка `https://www.linkedin.com/jobs/view/<job_id>` и название подписки. Одна вакансия из нескольких подписок отправляется один раз по `job_id`.
+Приложение читает письма LinkedIn из почты по IMAP: письма не удаляются, не перемещаются и по умолчанию не помечаются прочитанными (`BODY.PEEK`, папка открывается только на чтение). Из каждого письма берутся название, компания, локация, формат работы, ссылка `https://www.linkedin.com/jobs/view/<job_id>` и название подписки. Одна вакансия из нескольких подписок отправляется один раз по `job_id`.
 
 Нужен отдельный пароль приложения, а не основной пароль от почты.
 
@@ -113,7 +120,7 @@ python -m job_matcher.cli linkedin-once --no-notify
 python -m job_matcher.cli ingest-alert linkedin /path/to/linkedin-alert.txt
 ```
 
-## Профиль Кандидата
+## Профиль кандидата
 
 В [job_matcher/models.py](job_matcher/models.py) лежит нейтральный пример профиля. Реальный профиль храните локально: в SQLite-базе, импортированном JSON или `.env`-зависимой настройке, которая не попадает в Git.
 
@@ -135,7 +142,7 @@ python -m job_matcher.cli import-profile-json profile.json
 
 `name`, `target_roles` и `skills` на оценку пока не влияют: целевые роли и задачи заданы списками `ROLE_TERMS` и `TASK_TERMS` в [job_matcher/scoring.py](job_matcher/scoring.py).
 
-## CLI-Команды
+## CLI-команды
 
 Основные команды:
 
@@ -144,7 +151,7 @@ python -m job_matcher.cli import-profile-json profile.json
 | `python -m job_matcher.cli init-db` | Создать/обновить SQLite-схему |
 | `python -m job_matcher.cli monitor-once --headless` | Один проход по всем настроенным источникам без Telegram |
 | `python -m job_matcher.cli monitor-once --headless --notify` | Один проход с Telegram-уведомлениями |
-| `python -m job_matcher.cli hh-browser-login [--query TEXT]` | Открыть hh.ru в постоянном профиле для ручного входа/капчи |
+| `python -m job_matcher.cli hh-browser-login [--query TEXT]` | Открыть окно браузера, чтобы вручную пройти капчу, если она появилась |
 | `python -m job_matcher.cli hh-browser-once [--query TEXT] [--limit N] [--pages N] [--headless] [--notify]` | Один браузерный проход по hh.ru |
 | `python -m job_matcher.cli linkedin-once [--no-notify] [--notify]` | Один проход по LinkedIn Job Alerts |
 | `python -m job_matcher.cli ingest-alert linkedin PATH [--no-notify]` | Разобрать сохранённый текст LinkedIn alert |
@@ -164,22 +171,22 @@ python -m job_matcher.cli import-profile-json profile.json
 | `python -m job_matcher.cli hh-browser-notify-test [--query TEXT] [--limit N] [--headless]` | Отправить тестовое уведомление по реальной hh.ru-вакансии, если найдётся подходящая |
 | `python -m job_matcher.cli linkedin-notify-test` | Отправить тестовое уведомление по LinkedIn-вакансии, если найдётся подходящая |
 
-`install-launchd` пишет файл `~/Library/LaunchAgents/local.marina-job-search.hh-browser.plist` с абсолютными путями к проекту и загружает его через `launchctl`, после чего `monitor-once --headless --notify` запускается раз в `APP_POLL_INTERVAL_SECONDS` секунд, но не чаще раза в 5 минут. Отключить: `launchctl unload ~/Library/LaunchAgents/local.marina-job-search.hh-browser.plist`.
+`install-launchd` пишет файл `~/Library/LaunchAgents/local.marina-job-search.hh-browser.plist` с абсолютными путями к проекту и загружает его через `launchctl`, после чего `monitor-once --headless --notify` запускается раз в `APP_POLL_INTERVAL_SECONDS` секунд (по умолчанию 30 минут, не чаще раза в 5 минут). За запуск открываются 3 страницы поиска hh.ru (по одной на запрос) и страницы только новых вакансий, до 10 на запрос. Чтобы поменять интервал, сначала выгрузите старую задачу (`launchctl unload …`), потом снова выполните `install-launchd`. Отключить: `launchctl unload ~/Library/LaunchAgents/local.marina-job-search.hh-browser.plist`.
 
 Логи launchd по умолчанию пишутся в `data/logs/hh-browser.out.log` и `data/logs/hh-browser.err.log`.
 
-## Что Не Работает Или Не Проверено
+## Что не работает или не проверено
 
 - `LINKEDIN_MBOX_PATH` на реальном `.mbox`-экспорте не проверялся.
 - Gmail не проверялся на реальном ящике.
 - `linkedin-notify-test` и `hh-browser-notify-test` на реальных данных могут отправлять уведомления, поэтому запускайте их только осознанно.
 - Поля профиля `target_roles` и `skills` не используются в оценке (см. «Профиль кандидата»).
 
-## В Планах
+## В планах
 
 - **Команды Telegram-бота**: `/pause` (пауза), `/resume` (возобновить), `/threshold N` (порог), `/latest` (последние вакансии), `/why` (почему отобрана) и разбор пересланной боту ссылки LinkedIn. Код лежит в [job_matcher/telegram_bot.py](job_matcher/telegram_bot.py), но ни к одной команде не подключён: его нужно вызывать периодически, например из `monitor-once`. Пока паузу можно включить вручную: `sqlite3 data/job_matcher.sqlite "UPDATE state SET value='true' WHERE key='paused'"`.
 
-## Как Добавить Источник
+## Как добавить источник
 
 1. Создайте модуль `job_matcher/sources_<name>.py`, который возвращает `list[Vacancy]`.
 2. В [job_matcher/cli.py](job_matcher/cli.py) добавьте функцию `monitor_<name>(app, settings, args)`.

@@ -3,6 +3,7 @@ name = "marina-job-matcher"
 version = "0.1.0"
 description = "Local macOS job watcher for Marina Agibalova"
 requires-python = ">=3.9"
+license = { text = "MIT" }
 dependencies = [
   "pypdf==6.0.0",
   "python-docx==1.1.2",

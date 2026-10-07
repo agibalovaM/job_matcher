@@ -20,9 +20,9 @@ class WorkFormatTests(unittest.TestCase):
         self.assertEqual(parse_work_formats("Формат работы: вахта"), ["вахта"])
 
     def test_field_wins_over_text(self):
-        # Real case: "управлять удаленной командой" in an on-site Moscow vacancy.
-        self.assertFalse(detect_remote(["onsite"], "управлять ожиданиями заказчика и удаленной командой"))
-        self.assertFalse(detect_remote(["onsite", "hybrid"], "далее гибрид: часть недели в офисе, часть удалённо"))
+        # An on-site vacancy may still mention a remote team or partly working from home.
+        self.assertFalse(detect_remote(["onsite"], "координировать удалённую команду разработчиков"))
+        self.assertFalse(detect_remote(["onsite", "hybrid"], "после адаптации два дня в офисе, остальное удалённо"))
         self.assertTrue(detect_remote(["remote", "hybrid"], ""))
 
     def test_text_fallback_without_field(self):
@@ -52,7 +52,7 @@ class ScoringWithHHFieldsTests(unittest.TestCase):
         return score_vacancy(vacancy, CandidateProfile())
 
     def test_onsite_field_beats_remote_words_in_text(self):
-        result = self.score("Управлять удаленной командой инженеров.", work_formats=["onsite"])
+        result = self.score("Координировать удалённую команду.", work_formats=["onsite"])
         self.assertEqual(result.criteria["geography"], "reject")
         self.assertIn("Офис/гибрид вне ваших локаций (Example Country)", result.rejects)
 
@@ -163,3 +163,39 @@ class HHPageFailureTests(unittest.TestCase):
         with self.mock.patch.object(self.hh.log, "warning") as warning:
             self.assertEqual(self.hh.warn_missing_fields("u", {"description": "x"}), [])
         warning.assert_not_called()
+
+
+class KnownVacancySkipTests(unittest.TestCase):
+    """Vacancies already in the database are skipped without opening their page (less load on hh.ru)."""
+
+    setUp = HHPageFailureTests.setUp
+
+    def test_known_vacancy_page_not_opened(self):
+        opened = []
+
+        def enrich(context, vacancy):
+            opened.append(vacancy.source_id)
+            return vacancy
+
+        with self.mock.patch.object(self.hh, "vacancy_from_card", self.card), \
+                self.mock.patch.object(self.hh, "enrich_vacancy_from_detail", enrich):
+            vacancies = self.hh.extract_vacancies_from_page(None, FakePage(4), limit=10, is_known=lambda sid: sid in {"0", "2"})
+        self.assertEqual(opened, ["1", "3"])
+        self.assertEqual([v.source_id for v in vacancies], ["1", "3"])
+
+    def test_callback_counts_known_from_store(self):
+        import tempfile
+
+        from job_matcher.app import JobMatcherApp
+        from job_matcher.cli import known_hh_vacancy
+        from job_matcher.config import Settings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app = JobMatcherApp(Settings(db_path=f"{tmp}/jobs.sqlite"))
+            app.process_vacancies([self.card(None, 7)], notify=False)
+            counter = {}
+            is_known = known_hh_vacancy(app, counter)
+            self.assertTrue(is_known("7"))
+            self.assertFalse(is_known("8"))
+            self.assertEqual(counter, {"known": 1})
+            app.store.conn.close()
