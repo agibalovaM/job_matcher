@@ -1,0 +1,22 @@
+.env
+.venv/
+.browser-profiles/
+__pycache__/
+*.pyc
+.DS_Store
+dist/
+# Local database, backups and logs: personal data.
+data/
+# Real LinkedIn alert emails: contain the mailbox address and account-bound links.
+tests/fixtures/
+
+# Personal data that must stay local.
+profile*.json
+*.mbox
+*.eml
+*.pdf
+*.docx
+*.log
+*.sqlite
+# Tests on real emails/vacancies.
+tests/test_local_*.py
