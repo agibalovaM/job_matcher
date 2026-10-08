@@ -11,10 +11,16 @@ from .telegram import TelegramClient, format_vacancy_message
 
 MAX_NOTIFY_ATTEMPTS = 5
 
+# Searched in vacancy titles. General titles are intentional: many IT vacancies are called just
+# "Project Manager" or "Руководитель проектов"; relevance to IT is decided by the description and scoring.
 HH_BROWSER_QUERIES = [
     "IT Project Manager",
+    "Project Manager",
     "Delivery Manager",
     "Technical Project Manager",
+    "Руководитель проектов",
+    "Менеджер проектов",
+    "Проектный менеджер",
 ]
 
 

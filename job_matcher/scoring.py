@@ -17,6 +17,32 @@ ROLE_TERMS = [
     "руководитель проект",
     "менеджер проект",
 ]
+# Russian role titles with words in between: "Руководитель IT-проектов", "Проектный менеджер", "Менеджер по проектам".
+ROLE_TITLE_PATTERNS = [
+    re.compile(r"(?<![^\W_])руководител\w*\s+(?:(?:it|ит)[-\s]+)?проект"),
+    re.compile(r"(?<![^\W_])менеджер\w*\s+(?:(?:it|ит)[-\s]+)?проект"),
+    re.compile(r"(?<![^\W_])менеджер\w*\s+по\s+(?:(?:it|ит)[-\s]+)?проект"),
+    re.compile(r"(?<![^\W_])проектн\w*\s+менеджер"),
+    # "Проект-менеджер", "Проджект менеджер", "Delivery менеджер", "Project-manager", "Project & Product Manager".
+    re.compile(r"(?<![^\W_])(?:проект|проджект|project|delivery|деливери)[-\s]*(?:менеджер\w*|managers?(?![^\W_]))"),
+    re.compile(r"(?<![^\W_])project\s*(?:&|/|and|и)\s*\w+\s+managers?(?![^\W_])"),
+]
+# Signs that a vacancy is about IT (title or description). Russian entries are stems.
+IT_TERMS = [
+    "программн", "веб", "мобильн", "приложени", "бэкенд", "бекенд", "фронтенд",
+    "software", "saas", "web", "mobile", "app", "backend", "frontend", "api", "qa", "jira", "agile", "scrum",
+    "sdlc", "devops", "developer", "development", "ai", "ml", "crm", "erp", "cloud", "platform",
+    "платформ", "цифров",
+]
+# "разработ…" and "продукт…" only in an IT sense: "разработка продукта" and "косметические продукты" are not IT.
+IT_PHRASES = re.compile(
+    r"(?<![^\W_])(?:разработчик\w*|(?:команд|отдел)\w*\s+разработк\w*"
+    r"|разработк\w*\s+(?:по|программ\w*|сайт\w*|приложени\w*|сервис\w*|web|веб\w*|мобильн\w*|backend|frontend|игр\w*)"
+    r"|(?:it|ит|цифров\w*|digital|saas|b2b|b2c)[-\s]+продукт\w*|продуктов\w*\s+(?:команд\w*|компани\w*|разработк\w*))"
+)
+MIN_DESCRIPTION_FOR_IT_CHECK = 100
+# "IT"/"ИТ" only in capitals as a separate word: lowercase "it" is an English pronoun, "ит" starts "итог".
+IT_ABBREVIATION = re.compile(r"(?<![^\W_])(?:IT|ИТ)(?![^\W_])")
 TASK_TERMS = ["requirements", "требован", "risk", "риск", "stakeholder", "подряд", "contractor", "subcontractor", "sdlc", "web", "agile"]
 REMOTE_TERMS = ["remote", "удален", "удалён", "удаленная", "удалённая", "дистанционно", "remotely"]
 # Remote from anywhere is fine for everyone. Places and regions specific to the candidate come from the profile.
@@ -76,6 +102,25 @@ def has_term(text: str, term: str) -> bool:
 
 def has_any(text: str, terms: Iterable[str]) -> bool:
     return any(has_term(text, term) for term in terms)
+
+
+def title_has_role(title: str) -> bool:
+    lowered = normalize_text(title)
+    return has_any(lowered, ROLE_TERMS) or any(p.search(lowered) for p in ROLE_TITLE_PATTERNS)
+
+
+def it_signal(vacancy: Vacancy) -> Optional[str]:
+    """First IT sign found in the title or description, or None."""
+    raw = " ".join([vacancy.title, vacancy.description])
+    abbreviation = IT_ABBREVIATION.search(raw)
+    if abbreviation:
+        return abbreviation.group(0)
+    lowered = normalize_text(raw)
+    term = next((term for term in IT_TERMS if has_term(lowered, term)), None)
+    if term:
+        return term
+    phrase = IT_PHRASES.search(lowered)
+    return phrase.group(0) if phrase else None
 
 
 def english_required(text: str) -> Optional[str]:
@@ -196,7 +241,23 @@ def score_vacancy(vacancy: Vacancy, profile: CandidateProfile) -> MatchResult:
     criteria: dict = {}
     score = 0
 
-    if has_any(text, ROLE_TERMS):
+    if not title_only:
+        # Vacancies with a description (hh): the title must be a target role and the job must be about IT.
+        # General queries ("Руководитель проектов") otherwise bring construction, catering, cosmetics...
+        if not title_has_role(vacancy.title):
+            rejects.append("Название вакансии не совпадает с целевыми ролями (Project/Delivery Manager, руководитель/менеджер проектов)")
+            criteria["role_title"] = "reject"
+        elif not it_signal(vacancy):
+            if len(normalize_text(vacancy.description)) < MIN_DESCRIPTION_FOR_IT_CHECK:
+                # The vacancy page did not load (only the city is stored): no data is not "not IT".
+                gaps.append("Описание не загрузилось — признаки IT не проверены")
+                criteria["it"] = "unknown"
+            else:
+                rejects.append("Нет признаков IT в названии и описании")
+                criteria["it"] = "reject"
+
+    # Same title check as the role rule above, so "Проектный менеджер (IT)" or "Delivery менеджер" also get the points.
+    if title_has_role(vacancy.title):
         score += 2
         reasons.append("Роль совпадает с целевым направлением Project/Program/Delivery/Technical PM")
         criteria["role"] = "match"

@@ -107,7 +107,8 @@ def cmd_hh_browser_notify_test(args: argparse.Namespace) -> None:
     app = JobMatcherApp(settings)
     query = args.query or HH_BROWSER_QUERIES[0]
     try:
-        vacancies = search_hh_browser([query], limit_per_query=args.limit, pages=1, headless=args.headless)
+        vacancies = search_hh_browser([query], limit_per_query=args.limit, pages=1, headless=args.headless,
+                                      is_known=known_hh_vacancy(app, {}))
     except HHCaptchaDetected as exc:
         print(f"hh.ru browser stopped: {exc}")
         raise SystemExit(3) from exc

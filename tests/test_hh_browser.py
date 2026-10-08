@@ -199,3 +199,31 @@ class KnownVacancySkipTests(unittest.TestCase):
             self.assertFalse(is_known("8"))
             self.assertEqual(counter, {"known": 1})
             app.store.conn.close()
+
+
+class RunSkipperTests(unittest.TestCase):
+    def test_same_vacancy_opened_once_per_run(self):
+        from job_matcher.sources_hh_browser import run_skipper
+
+        known_calls = []
+        skip = run_skipper(lambda sid: known_calls.append(sid) or sid == "db")
+        self.assertFalse(skip("1"))   # new: open
+        self.assertTrue(skip("1"))    # same vacancy from another query: do not open again
+        self.assertTrue(skip("db"))   # already in the database
+        self.assertEqual(known_calls, ["1", "db"])
+
+    def test_two_queries_one_page_open(self):
+        from unittest import mock
+
+        from job_matcher import sources_hh_browser as hh
+
+        opened = []
+        card = lambda c, idx: Vacancy(source="hh-browser", source_id=str(idx % 2), title="PM", company="Acme",
+                                      url=f"https://hh.ru/vacancy/{idx % 2}")
+        skip = hh.run_skipper()
+        with mock.patch.object(hh, "vacancy_from_card", card), \
+                mock.patch.object(hh, "enrich_vacancy_from_detail", lambda ctx, v: opened.append(v.source_id) or v):
+            first = hh.extract_vacancies_from_page(None, FakePage(2), limit=10, is_known=skip)   # query 1: ids 0, 1
+            second = hh.extract_vacancies_from_page(None, FakePage(2), limit=10, is_known=skip)  # query 2: same ids
+        self.assertEqual(opened, ["0", "1"])
+        self.assertEqual(([v.source_id for v in first], second), (["0", "1"], []))

@@ -60,7 +60,7 @@ class LinkedInNoFilteringTests(PipelineCase):
         self.assertIn(f"Оценка: {result.score} (для информации, на отправку не влияет)", self.telegram.messages[0])
 
     def test_former_stop_word_titles_are_sent(self):
-        titles = ["SAP Project Manager", "Associate Director_cFSP RSU_EMEA", "Head of Projects", "Infrastructure Project Manager"]
+        titles = ["SAP Project Manager", "Regional Director_EMEA Sales", "Head of Projects", "Infrastructure Project Manager"]
         for n, title in enumerate(titles):
             vacancies = self.one(title, "Acme · Example City, Example Country (Remote)", job_id=f"41000000{50 + n}")
             self.assertEqual(self.app.process_vacancies(vacancies), (1, 1), title)

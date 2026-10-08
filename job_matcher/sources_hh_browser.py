@@ -47,6 +47,7 @@ def search_hh_browser(
 
     Path(profile_dir).mkdir(parents=True, exist_ok=True)
     vacancies: List[Vacancy] = []
+    skip = run_skipper(is_known)
     with sync_playwright() as pw:
         context = pw.chromium.launch_persistent_context(
             user_data_dir=profile_dir,
@@ -77,7 +78,7 @@ def search_hh_browser(
                             raise HHCaptchaDetected(
                                 "hh.ru showed a captcha. Complete it manually in the opened browser window, then rerun."
                             )
-                    vacancies.extend(extract_vacancies_from_page(context, page, limit_per_query, is_known))
+                    vacancies.extend(extract_vacancies_from_page(context, page, limit_per_query, skip))
         finally:
             context.close()
     return vacancies
@@ -107,6 +108,20 @@ def is_captcha_page(page) -> bool:
     text = safe_inner_text(page, "body").lower()
     url = page.url.lower()
     return "captcha" in url or "капч" in text or "подтвердите, что вы не робот" in text
+
+
+def run_skipper(is_known: Optional[Callable[[str], bool]] = None) -> Callable[[str], bool]:
+    """Skip a vacancy already in the database, or already seen earlier in this run:
+    overlapping queries ("IT Project Manager" is part of "Project Manager") return the same vacancy."""
+    seen_in_run: set = set()
+
+    def skip(source_id: str) -> bool:
+        if source_id in seen_in_run:
+            return True
+        seen_in_run.add(source_id)
+        return bool(is_known and is_known(source_id))
+
+    return skip
 
 
 def extract_vacancies_from_page(context, page, limit: int, is_known: Optional[Callable[[str], bool]] = None) -> List[Vacancy]:

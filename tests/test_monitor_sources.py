@@ -80,5 +80,42 @@ class RemovedHHApiTests(unittest.TestCase):
         self.assertEqual(HH_BROWSER_QUERIES[0], "IT Project Manager")
 
 
+class HHQueriesTests(unittest.TestCase):
+    def test_seven_title_queries_incl_russian(self):
+        from job_matcher.app import HH_BROWSER_QUERIES
+
+        self.assertEqual(HH_BROWSER_QUERIES, [
+            "IT Project Manager", "Project Manager", "Delivery Manager", "Technical Project Manager",
+            "Руководитель проектов", "Менеджер проектов", "Проектный менеджер",
+        ])
+
+    def test_readme_page_count_matches_queries(self):
+        import pathlib
+
+        from job_matcher.app import HH_BROWSER_QUERIES
+
+        readme = (pathlib.Path(cli.__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"{len(HH_BROWSER_QUERIES)} страниц поиска", readme)
+        self.assertNotIn("3 страницы поиска", readme)
+
+
+class NotifyTestSkipsKnownTests(unittest.TestCase):
+    def test_hh_browser_notify_test_passes_is_known(self):
+        captured = {}
+
+        def fake_search(queries, **kwargs):
+            captured.update(kwargs)
+            return []
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        args = argparse.Namespace(query="Project Manager", limit=5, headless=True)
+        with mock.patch.object(cli, "search_hh_browser", fake_search), \
+                mock.patch.object(cli.Settings, "from_env", return_value=Settings(db_path=f"{tmp.name}/jobs.sqlite")), \
+                redirect_stdout(io.StringIO()):
+            cli.cmd_hh_browser_notify_test(args)
+        self.assertTrue(callable(captured.get("is_known")))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -209,7 +209,7 @@ class ScoringRulesV2Tests(unittest.TestCase):
         self.assertEqual(result.criteria["industry"], "reject")
 
     def test_power_bi_is_not_an_industry(self):
-        result = self.score("опыт работы с excel, google sheets, power bi или looker studio.")
+        result = self.score("нужен опыт с таблицами и дашбордами в power bi для отчётов.")
         self.assertEqual(result.criteria["industry"], "match")
 
     # Geography
@@ -227,7 +227,7 @@ class ScoringRulesV2Tests(unittest.TestCase):
         self.assertEqual(result.criteria["geography"], "reject")
 
     def test_remote_from_anywhere_is_match(self):
-        result = self.score("гибридный формат для москвы или удаленная работа из любой точки мира", remote=True)
+        result = self.score("офис в москве по желанию, можно удалённо из любой точки мира", remote=True)
         self.assertEqual(result.criteria["geography"], "match")
 
     # Experience
@@ -271,7 +271,7 @@ class BorderlineCasesTests(unittest.TestCase):
 
     def test_remote_six_years_passes_as_borderline(self):
         vacancy = Vacancy(
-            source="hh-browser", source_id="100002", title="Project / Delivery Manager", company="Hooli",
+            source="hh-browser", source_id="100002", title="Delivery / Project Manager", company="Hooli",
             url="https://example.com/vacancy/100002", location="Москва", remote=True,
             description="Удалённая работа. Опыт работы в управлении проектами от 6 лет.",
         )
@@ -394,7 +394,7 @@ class WordBoundaryTests(unittest.TestCase):
         self.assertTrue(has_term("we hire project managers", "project manager"))
         self.assertTrue(has_term("manage risks and stakeholders", "risk"))
         self.assertTrue(has_term("web-products", "web"))
-        self.assertTrue(has_term("associate director rsu_emea", "emea"))
+        self.assertTrue(has_term("regional lead team_emea", "emea"))
         self.assertTrue(has_term("open to candidates from the us only", "us only"))
         self.assertTrue(has_term("remote (gmt+1)", "gmt+1"))
 
@@ -448,3 +448,69 @@ class ProfileGeographyTests(unittest.TestCase):
         profile = CandidateProfile(location="Lisbon, Portugal", work_permits=["Portugal"], places=["Lisbon"])
         result = self.score("Remote role.", "Remote", True, profile)
         self.assertIn("Пограничная: удалёнка без указания страны — уточните, можно ли из ваших локаций (Portugal)", result.gaps)
+
+
+class RoleAndITGateTests(unittest.TestCase):
+    """hh vacancies need a target role in the title and an IT sign in the title or description."""
+
+    def score(self, title, description, location="Remote", remote=True, source="hh-browser"):
+        vacancy = Vacancy(source=source, source_id="g", title=title, company="Acme", url="https://example.com/g",
+                          description=description, location=location, remote=remote)
+        return score_vacancy(vacancy, CandidateProfile())
+
+    IT_TEXT = "Удалённо, работа из любой точки мира. Управление командой разработки мобильного приложения, Jira, риски, требования."
+
+    def test_role_spellings_in_title(self):
+        from job_matcher.scoring import title_has_role
+
+        for title in ["IT Project Manager", "Delivery менеджер в продуктовую команду", "Проект-менеджер (платформа данных)",
+                      "Project-manager (мобильные приложения)", "Project & Delivery Manager (SaaS)", "Руководитель IT-проектов",
+                      "Руководитель проектов", "Менеджер проекта", "Менеджер по проектам", "Проектный менеджер",
+                      "Проджект менеджер (технический)"]:
+            with self.subTest(title=title):
+                self.assertTrue(title_has_role(title))
+        for title in ["Начальник отдела снабжения (проект)", "Менеджер по оценке проектов",
+                      "Менеджер выставочного проекта", "Warehouse Coordinator", "Менеджер по продажам (рекламные проекты)",
+                      "Project Managerment Specialist"]:
+            with self.subTest(title=title):
+                self.assertFalse(title_has_role(title))
+
+    def test_it_signs(self):
+        from job_matcher.scoring import it_signal
+
+        def sign(text):
+            return it_signal(Vacancy(source="hh-browser", source_id="1", title="PM", company="c", url="u", description=text))
+
+        for text in ["Работа в ИТ-компании", "IT department", "команда разработки", "мы ищем разработчиков",
+                     "развитие цифрового продукта", "AI/ML платформа", "Jira и Scrum", "мобильное приложение"]:
+            with self.subTest(text=text):
+                self.assertIsNotNone(sign(text))
+        for text in ["It is a great opportunity.", "Подводим итоги квартала", "следить за разработкой упаковки и выводить товар на рынок",
+                     "продукты для дома", "монтаж металлоконструкций"]:
+            with self.subTest(text=text):
+                self.assertIsNone(sign(text))
+
+    def test_non_it_project_manager_rejected(self):
+        result = self.score("Project manager (бытовая химия)", "Удалённо. Работать с фабриками, следить за разработкой упаковки и выводить товар на рынок. " * 3)
+        self.assertEqual(result.criteria["it"], "reject")
+        self.assertFalse(result.passed)
+
+    def test_non_role_title_rejected(self):
+        result = self.score("Начальник отдела снабжения (проект)", self.IT_TEXT)
+        self.assertEqual(result.criteria["role_title"], "reject")
+        self.assertFalse(result.passed)
+
+    def test_it_project_manager_passes(self):
+        result = self.score("Руководитель IT-проектов", self.IT_TEXT)
+        self.assertEqual(result.rejects, [])
+        self.assertGreaterEqual(result.score, 4)
+
+    def test_missing_description_is_not_rejected_as_non_it(self):
+        result = self.score("Product Delivery Manager", "Санкт-Петербург")
+        self.assertEqual(result.criteria["it"], "unknown")
+        self.assertNotIn("Нет признаков IT в названии и описании", result.rejects)
+
+    def test_linkedin_without_description_not_gated(self):
+        result = self.score("Начальник отдела снабжения", "", source="linkedin")
+        self.assertNotIn("role_title", result.criteria)
+        self.assertNotIn("it", result.criteria)
