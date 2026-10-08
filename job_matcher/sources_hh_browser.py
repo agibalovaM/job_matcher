@@ -388,6 +388,29 @@ def detect_remote(work_formats: List[str], text: str) -> bool:
     return is_remote_text(text)
 
 
+REMOTE_WORDS = ["удален", "удалён", "remote", "remotely"]
+# "не удалённо", "без удалёнки", "не полностью удалённо", "not remote", "no remote", "non-remote".
+# Only qualifiers may stand in between: "без микроменеджмента удалённый формат" is not a negation of remote.
+REMOTE_NEGATION_BEFORE = re.compile(
+    r"(?<![^\W_])(?:не|без|нет|not|no|non)(?:[\s-]+(?:полностью|совсем|всегда|только|fully|always|a|an))?[\s-]*$"
+)
+# "удалёнки нет", "удалённая работа не предусмотрена / невозможна", "remote is not possible", "remote work isn't offered".
+REMOTE_NEGATION_AFTER = re.compile(
+    r"^[^\W\d_]*(?:\s+(?:работ[^\W\d_]*|формат[^\W\d_]*|work))?\s*[-—:]?\s*"
+    r"(?:нет(?![^\W_])|не\s+(?:предусмотрен|возможн|рассматрива|подходит)|невозможн|is\s+not|isn't|not\s+(?:possible|available|offered))"
+)
+
+
 def is_remote_text(text: str) -> bool:
+    """Free-text fallback when hh shows no work format: a remote word as a word, not negated."""
+    from .scoring import term_regex  # same word-boundary rules as scoring
+
     lowered = (text or "").lower()
-    return any(term in lowered for term in ["удален", "удалён", "remote"])
+    for word in REMOTE_WORDS:
+        for match in term_regex(word).finditer(lowered):
+            before = lowered[max(0, match.start() - 25):match.start()]
+            after = lowered[match.end():match.end() + 45]
+            if REMOTE_NEGATION_BEFORE.search(before) or REMOTE_NEGATION_AFTER.search(after):
+                continue
+            return True
+    return False

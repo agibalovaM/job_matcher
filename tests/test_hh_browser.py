@@ -227,3 +227,25 @@ class RunSkipperTests(unittest.TestCase):
             second = hh.extract_vacancies_from_page(None, FakePage(2), limit=10, is_known=skip)  # query 2: same ids
         self.assertEqual(opened, ["0", "1"])
         self.assertEqual(([v.source_id for v in first], second), (["0", "1"], []))
+
+
+class RemoteTextFallbackTests(unittest.TestCase):
+    """Fallback when hh shows no work format: remote words as words, negations respected."""
+
+    def test_remote_mentions(self):
+        from job_matcher.sources_hh_browser import is_remote_text
+
+        for text in ["Удалённая работа", "работа удаленно", "Формат: удалёнка", "Remote, worldwide", "Works remotely",
+                     "без микроменеджмента, удаленный формат", "Удалёнка возможна после испытательного срока"]:
+            with self.subTest(text=text):
+                self.assertTrue(is_remote_text(text))
+
+    def test_negations_and_substrings(self):
+        from job_matcher.sources_hh_browser import is_remote_text
+
+        for text in ["работа только в офисе (не удалёнка)", "Работа не удалённая", "без удалёнки", "гибрида и удаленки нет",
+                     "Удалённая работа не предусмотрена", "Удаленная работа невозможна", "не полностью удалённо",
+                     "Not remote", "Not a remote role", "no remote work", "non-remote role", "Remote is not possible",
+                     "remoteness"]:
+            with self.subTest(text=text):
+                self.assertFalse(is_remote_text(text))

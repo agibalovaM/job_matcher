@@ -4,6 +4,7 @@ import argparse
 import json
 import plistlib
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
@@ -313,10 +314,20 @@ def cmd_install_launchd(args: argparse.Namespace) -> None:
     print(f"logs={logs}")
 
 
-# Sources polled by monitor-once (launchd). Each returns (fetched, new, sent), or None when not configured.
+# Sources polled by monitor-once (launchd). Each returns (fetched, new, sent) or (fetched, new, sent, details),
+# or None when not configured.
 # To add a source: a module job_matcher/sources_<name>.py that returns list[Vacancy],
 # a monitor_<name> function below that passes them to app.process_vacancies, and one entry in MONITOR_SOURCES.
-SourceRun = Optional[Tuple[int, int, int]]
+SourceRun = Optional[tuple]
+SOURCE_DOWN_ALERT_AFTER = 3
+
+
+def now() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def log(message: str) -> None:
+    print(f"{now()} {message}", flush=True)
 
 
 def known_hh_vacancy(app: JobMatcherApp, counter: dict):
@@ -334,21 +345,20 @@ def monitor_hh_browser(app: JobMatcherApp, settings: Settings, args: argparse.Na
         vacancies = search_hh_browser(HH_BROWSER_QUERIES, limit_per_query=args.limit, pages=args.pages,
                                       headless=args.headless, is_known=known_hh_vacancy(app, counter))
     except HHCaptchaDetected as exc:
-        print(f"hh.ru browser stopped: {exc}")
+        log(f"hh.ru browser stopped: {exc}")
         notify_browser_attention(app, str(exc))
-        return 0, 0, 0
+        return 0, 0, 0, "captcha"
     # Re-arm the captcha alert once the browser works again.
     app.store.set_state("hh_browser_attention_sent", "false")
-    print(f"monitor hh: known={counter.get('known', 0)} (pages not opened), new pages opened={len(vacancies)}")
     seen, sent = app.process_vacancies(vacancies, notify=args.notify)
-    return len(vacancies), seen, sent
+    return len(vacancies), seen, sent, f"known={counter.get('known', 0)} (pages not opened)"
 
 
 def monitor_linkedin(app: JobMatcherApp, settings: Settings, args: argparse.Namespace) -> SourceRun:
     if not linkedin_imap_configured(settings):
         return None
-    _, fetched, seen, sent = app.process_linkedin_mailbox(LinkedInMailbox.from_settings(settings), notify=args.notify)
-    return fetched, seen, sent
+    emails, fetched, seen, sent = app.process_linkedin_mailbox(LinkedInMailbox.from_settings(settings), notify=args.notify)
+    return fetched, seen, sent, f"emails={emails}"
 
 
 MONITOR_SOURCES: list[Tuple[str, Callable[[JobMatcherApp, Settings, argparse.Namespace], SourceRun]]] = [
@@ -357,30 +367,67 @@ MONITOR_SOURCES: list[Tuple[str, Callable[[JobMatcherApp, Settings, argparse.Nam
 ]
 
 
+def track_source_health(app: JobMatcherApp, name: str, error: Optional[str], notify: bool) -> None:
+    """Count failed runs in a row per source; one Telegram message when a source has failed
+    SOURCE_DOWN_ALERT_AFTER runs in a row, and one when it works again."""
+    failures_key, alerted_key = f"source_failures:{name}", f"source_down_alert:{name}"
+    failures = int(app.store.get_state(failures_key, "0") or "0")
+    alerted = app.store.get_state(alerted_key, "false") == "true"
+    if error is None:
+        if alerted and notify and send_service_message(app, f"Мониторинг: источник «{name}» снова работает (после {failures} неудачных запусков подряд)."):
+            app.store.set_state(alerted_key, "false")
+        if failures:
+            app.store.set_state(failures_key, "0")
+        return
+    failures += 1
+    app.store.set_state(failures_key, str(failures))
+    if failures >= SOURCE_DOWN_ALERT_AFTER and not alerted and notify:
+        text = (f"Мониторинг: источник «{name}» не работает {failures} запуска подряд.\n"
+                f"Последняя ошибка: {error[:300]}\nЛог: data/logs/hh-browser.out.log")
+        if send_service_message(app, text):
+            app.store.set_state(alerted_key, "true")
+
+
+def send_service_message(app: JobMatcherApp, text: str) -> bool:
+    if not app.telegram.enabled:
+        return False
+    try:
+        app.telegram.send_message(text)
+        return True
+    except Exception as exc:
+        log(f"failed to send service message: {type(exc).__name__}")
+        return False
+
+
 def cmd_monitor_once(args: argparse.Namespace) -> None:
     settings = Settings.from_env()
     app = JobMatcherApp(settings)
+    log("monitor start")
     total_fetched = total_new = total_sent = 0
     for name, run in MONITOR_SOURCES:
         try:
             result = run(app, settings, args)
         except Exception as exc:
             # One broken source must not stop the others.
-            print(f"monitor {name} failed: {type(exc).__name__}: {exc}")
+            error = f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
+            log(f"monitor {name} failed: {type(exc).__name__}: {exc}")
+            track_source_health(app, name, error, args.notify)
             continue
         if result is None:
-            print(f"monitor {name}: skipped=not_configured")
+            log(f"monitor {name}: skipped=not_configured")
             continue
-        fetched, seen, sent = result
+        track_source_health(app, name, None, args.notify)
+        fetched, seen, sent, *details = result
         total_fetched += fetched
         total_new += seen
         total_sent += sent
-        print(f"monitor {name}: fetched={fetched}, new={seen}, sent={sent}")
+        extra = f"{details[0]}, " if details else ""
+        log(f"monitor {name}: {extra}fetched={fetched}, new={seen}, sent={sent}")
     if args.notify:
         retried = app.retry_failed_notifications()
         total_sent += retried
-        print(f"monitor retry: sent={retried}")
-    print(f"monitor total: fetched={total_fetched}, new={total_new}, sent={total_sent}")
+        log(f"monitor retry: sent={retried}")
+    log(f"monitor total: fetched={total_fetched}, new={total_new}, sent={total_sent}")
 
 
 def build_parser() -> argparse.ArgumentParser:

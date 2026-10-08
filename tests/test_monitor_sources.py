@@ -117,5 +117,70 @@ class NotifyTestSkipsKnownTests(unittest.TestCase):
         self.assertTrue(callable(captured.get("is_known")))
 
 
+class MonitorLogAndHealthTests(unittest.TestCase):
+    """Timestamps in the log, emails count for LinkedIn, Telegram on 3 failures in a row and on recovery."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.settings = Settings(db_path=f"{self.tmp.name}/jobs.sqlite", telegram_bot_token="x", telegram_chat_id="1")
+        self.sent = []
+        self.fail = True
+
+    def run_monitor(self, sources, notify=True):
+        from job_matcher.telegram import TelegramClient
+
+        args = argparse.Namespace(notify=notify, limit=1, pages=1, headless=True)
+        out = io.StringIO()
+        with mock.patch.object(cli, "MONITOR_SOURCES", sources), \
+                mock.patch.object(cli.Settings, "from_env", return_value=self.settings), \
+                mock.patch.object(TelegramClient, "send_message", lambda _, text, chat_id=None: self.sent.append(text)), \
+                redirect_stdout(out):
+            cli.cmd_monitor_once(args)
+        return out.getvalue()
+
+    def flaky(self, app, settings, args):
+        if self.fail:
+            raise RuntimeError("IMAP down")
+        return 0, 0, 0, "emails=2"
+
+    def test_every_line_has_a_timestamp_and_details(self):
+        self.fail = False
+        output = self.run_monitor([("linkedin", self.flaky)])
+        lines = [l for l in output.splitlines() if l.strip()]
+        self.assertTrue(lines[0].endswith("monitor start"))
+        for line in lines:
+            self.assertRegex(line, r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ")
+        self.assertIn("monitor linkedin: emails=2, fetched=0, new=0, sent=0", output)
+
+    def test_alert_after_three_failures_and_on_recovery(self):
+        for _ in range(2):
+            self.run_monitor([("linkedin", self.flaky)])
+        self.assertEqual(self.sent, [])
+        self.run_monitor([("linkedin", self.flaky)])
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("«linkedin» не работает 3 запуска подряд", self.sent[0])
+        self.assertIn("IMAP down", self.sent[0])
+        self.run_monitor([("linkedin", self.flaky)])          # 4th failure: no repeat
+        self.assertEqual(len(self.sent), 1)
+        self.fail = False
+        self.run_monitor([("linkedin", self.flaky)])          # recovered
+        self.assertEqual(len(self.sent), 2)
+        self.assertIn("«linkedin» снова работает", self.sent[1])
+        self.run_monitor([("linkedin", self.flaky)])          # still fine: nothing more
+        self.assertEqual(len(self.sent), 2)
+
+    def test_no_alerts_without_notify(self):
+        for _ in range(3):
+            self.run_monitor([("linkedin", self.flaky)], notify=False)
+        self.assertEqual(self.sent, [])
+
+    def test_success_resets_the_counter(self):
+        for fail in (True, True, False, True, True):
+            self.fail = fail
+            self.run_monitor([("linkedin", self.flaky)])
+        self.assertEqual(self.sent, [])
+
+
 if __name__ == "__main__":
     unittest.main()
